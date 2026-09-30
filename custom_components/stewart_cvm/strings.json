@@ -3,6 +3,7 @@
     "step": {
       "user": {
         "title": "Stewart CVM",
+        "description": "List the preset aspect ratios and motor positions in the CVM's preset order (1, 2, 3, …), separated by commas. The motor positions can be recalibrated later from Configure.",
         "menu_options": {
           "import_legacy": "Import the existing CVM setup",
           "manual": "Set up a new controller"
@@ -18,26 +19,44 @@
       "import_legacy": {
         "title": "Import {title}",
         "description": "Takes over the old CVM integration's setup for {host}: its settings, device and entities, so entity IDs, history, areas and automations keep working. The old entry is removed afterwards."
+      },
+      "reconfigure": {
+        "title": "Stewart CVM connection",
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password"
+        }
       }
     },
     "error": {
       "cannot_connect": "Cannot connect",
-      "invalid_auth": "Invalid authentication",
+      "invalid_auth": "The controller didn't accept the username and password",
+      "invalid_presets": "Aspect ratios and motor positions must be comma-separated numbers, one position per aspect ratio, with no repeated aspect ratio",
       "unknown": "Unknown error"
     },
     "abort": {
-      "already_configured": "Already configured",
-      "no_legacy_entry": "No setup from the old CVM integration was found."
+      "already_configured": "This controller is already configured",
+      "no_legacy_entry": "No setup from the old CVM integration was found.",
+      "reconfigure_successful": "Connection updated"
     }
   },
   "options": {
     "step": {
       "init": {
+        "description": "With Recalibrate on, each preset is recalled in turn and its motor position recorded, which moves the mask. Turn it off to save the motor positions as entered.",
         "data": {
           "cvmpresetar": "Preset Aspect Ratios",
-          "cvmpresetpos": "Preset Motor Positions"
+          "cvmpresetpos": "Preset Motor Positions",
+          "recalibrate": "Recalibrate"
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect",
+      "invalid_presets": "Aspect ratios and motor positions must be comma-separated numbers, one position per aspect ratio, with no repeated aspect ratio",
+      "recalibrate_failed": "The motor didn't stop at a preset in time",
+      "recalibrate_exception": "Recalibration failed; see the log"
     }
   }
 }

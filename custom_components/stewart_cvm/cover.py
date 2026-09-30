@@ -1,26 +1,24 @@
-"""Platform for sensor integration."""
+"""Screen mask cover."""
 
-import logging
+from typing import Any
 
 from homeassistant.components.cover import (
+    ATTR_POSITION,
     CoverDeviceClass,
     CoverEntity,
     CoverEntityFeature,
-    CoverState,
 )
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import CVMConfigEntry, CVMCoordinator
 from .entity import CVMEntity
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: CVMConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add cover entity."""
     coord = config_entry.runtime_data
@@ -28,10 +26,10 @@ async def async_setup_entry(
     async_add_entities([CVMCover(coord)])
 
 
-class CVMCover(CoverEntity, CVMEntity):
-    """Screen as a cover."""
+class CVMCover(CVMEntity, CoverEntity):
+    """Screen as a cover. Closed is the narrowest preset, fully open the widest."""
 
-    device_class = CoverDeviceClass.CURTAIN
+    _attr_device_class = CoverDeviceClass.CURTAIN
     _attr_supported_features = (
         CoverEntityFeature.OPEN
         | CoverEntityFeature.CLOSE
@@ -41,65 +39,30 @@ class CVMCover(CoverEntity, CVMEntity):
 
     def __init__(self, coord: CVMCoordinator) -> None:
         """Get going."""
-        super().__init__(coord, "Screen Mask")
+        super().__init__(coord, "screen_mask", "Screen Mask")
 
     def set_state(self) -> None:
         """Set how things are."""
-        status = self.coordinator.device.data["motor_status"]
-        self._attr_current_cover_position = self.coordinator.device.data["cover_position"]
-        self._attr_is_closing = (status == "EXTENDING")
-        self._attr_is_opening = (status == "RETRACTING")
-        self._attr_state = CoverState.CLOSED if self.is_closed else CoverState.OPEN
-        self._attr_extra_state_attributes = self.coordinator.device.data
+        data = self.device.data
+        position = data.get("cover_position")
+        self._attr_current_cover_position = position
+        self._attr_is_closed = None if position is None else position == 0
+        self._attr_is_closing = data["motor_status"] == "EXTENDING"
+        self._attr_is_opening = data["motor_status"] == "RETRACTING"
+        self._attr_extra_state_attributes = dict(data)
 
-    @property
-    def current_cover_position(self) -> int:
-        """Return scaled position."""
-        return self._attr_current_cover_position
-
-    @property
-    def is_closed(self) -> bool:
-        """Return scaled position."""
-        return (self.current_cover_position == 0)
-
-    @property
-    def is_open(self) -> bool:
-        """Return open."""
-        return (self.current_cover_position == 100)
-
-    @property
-    def is_closing(self) -> bool:
-        """Return scaled position."""
-        return self._attr_is_closing
-
-    @property
-    def is_opening(self) -> bool:
-        """Return scaled position."""
-        return self._attr_is_opening
-
-    @property
-    def entity_type(self) -> str:
-        """Type of entity."""
-        return "screen"
-
-    async def async_set_cover_position(self, **kwargs) -> None:
+    async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Set position."""
-        await self.coordinator.device.set_position(int(kwargs.get("position")))
+        await self.device.set_position(int(kwargs[ATTR_POSITION]))
 
-    async def async_open_cover(self, **kwargs) -> None:
+    async def async_open_cover(self, **kwargs: Any) -> None:
         """Open up."""
-        await self.coordinator.device.open_mask()
+        await self.device.open_mask()
 
-    async def async_close_cover(self, **kwargs) -> None:
+    async def async_close_cover(self, **kwargs: Any) -> None:
         """Close down."""
-        await self.coordinator.device.close_mask()
+        await self.device.close_mask()
 
-    async def async_stop_cover(self, **kwargs) -> None:
+    async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop cover."""
-        await self.coordinator.device.stop_mask()
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        self.set_state()
-        self.schedule_update_ha_state()
+        await self.device.stop_mask()

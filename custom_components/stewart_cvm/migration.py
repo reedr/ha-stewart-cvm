@@ -1,4 +1,4 @@
-"""Take over the device and entities of a config entry from the legacy "CVM" domain."""
+"""Registry migrations: the legacy "CVM" domain and host-based unique IDs."""
 
 from __future__ import annotations
 
@@ -48,3 +48,23 @@ def async_migrate_legacy_entry(hass: HomeAssistant, entry: CVMConfigEntry) -> No
 
     data = {k: v for k, v in entry.data.items() if k != CONF_LEGACY_ENTRY}
     hass.config_entries.async_update_entry(entry, data=data)
+
+
+# Unique ID suffixes used before 0.2.0, when IDs were based on "CVM:<host>".
+_LEGACY_KEYS = {"Screen Mask": "screen_mask", "Screen Aspect Ratio": "screen_aspect_ratio"}
+
+
+def async_migrate_unique_ids(hass: HomeAssistant, entry: CVMConfigEntry) -> None:
+    """Rekey host-based device and entity unique IDs to the config entry ID."""
+    ent_reg = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        prefix, _, name = entity.unique_id.rpartition("_")
+        if prefix.startswith("CVM:") and name in _LEGACY_KEYS:
+            ent_reg.async_update_entity(
+                entity.entity_id, new_unique_id=f"{entry.entry_id}_{_LEGACY_KEYS[name]}"
+            )
+
+    dev_reg = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        if any(domain == DOMAIN and ident.startswith("CVM:") for domain, ident in device.identifiers):
+            dev_reg.async_update_device(device.id, new_identifiers={(DOMAIN, entry.entry_id)})

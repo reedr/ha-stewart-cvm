@@ -10,24 +10,29 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     CONF_LEGACY_ENTRY,
+    CONF_RECALIBRATE,
     CVM_PRESETS_ASPECT,
     CVM_PRESETS_POSITION,
     DOMAIN,
     LEGACY_DOMAIN,
 )
-from .device import CVMDevice
+from .device import CVMAuthError, CVMConnectionError, CVMDevice, parse_aspects, parse_presets
 
 _LOGGER = logging.getLogger(__name__)
 
-CONFIG_USER_DATA_SCHEMA = vol.Schema(
+CONNECTION_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
+    }
+)
+
+CONFIG_USER_DATA_SCHEMA = CONNECTION_SCHEMA.extend(
+    {
         vol.Required(CVM_PRESETS_ASPECT): str,
         vol.Required(CVM_PRESETS_POSITION): str
     }
@@ -36,22 +41,31 @@ CONFIG_USER_DATA_SCHEMA = vol.Schema(
 OPTIONS_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CVM_PRESETS_ASPECT): str,
-        vol.Required(CVM_PRESETS_POSITION): str
+        vol.Required(CVM_PRESETS_POSITION): str,
+        vol.Required(CONF_RECALIBRATE, default=True): bool,
     }
 )
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect."""
+async def validate_connection(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, str]:
+    """Try to log in; return form errors."""
+    dev = CVMDevice(
+        hass, data[CONF_HOST], data[CONF_USERNAME], data[CONF_PASSWORD], "1", "0"
+    )
+    try:
+        await dev.test_connection()
+    except CVMAuthError:
+        return {"base": "invalid_auth"}
+    except CVMConnectionError:
+        return {"base": "cannot_connect"}
+    except Exception:
+        _LOGGER.exception("Unexpected exception")
+        return {"base": "unknown"}
+    return {}
 
-    dev = CVMDevice(hass, data[CONF_HOST], data[CONF_USERNAME], data[CONF_PASSWORD], data[CVM_PRESETS_ASPECT], data[CVM_PRESETS_POSITION])
-    if await dev.test_connection():
-        return {"title": "Stewart CVM"}
-
-    raise CannotConnect
 
 class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for 2N Intercom."""
+    """Handle a config flow for Stewart CVM."""
 
     VERSION = 1
 
@@ -72,6 +86,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         ]
 
     @staticmethod
+    @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         """Create the options flow."""
         return OptionsFlowHandler()
@@ -87,20 +102,20 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         if user_input is not None:
+            self._async_abort_entries_match({CONF_HOST: user_input[CONF_HOST]})
             try:
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+                parse_presets(user_input[CVM_PRESETS_ASPECT], user_input[CVM_PRESETS_POSITION])
+            except ValueError:
+                errors["base"] = "invalid_presets"
             else:
-                return self.async_create_entry(title=info["title"], data=user_input)
+                errors = await validate_connection(self.hass, user_input)
+            if not errors:
+                return self.async_create_entry(title="Stewart CVM", data=user_input)
 
         return self.async_show_form(
-            step_id="user", data_schema=CONFIG_USER_DATA_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=self.add_suggested_values_to_schema(CONFIG_USER_DATA_SCHEMA, user_input),
+            errors=errors,
         )
 
     async def async_step_manual(
@@ -118,6 +133,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         if not legacies:
             return self.async_abort(reason="no_legacy_entry")
         legacy = legacies[0]
+        self._async_abort_entries_match({CONF_HOST: legacy.data[CONF_HOST]})
         if user_input is None:
             return self.async_show_form(
                 step_id="import_legacy",
@@ -132,29 +148,68 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             options=dict(legacy.options),
         )
 
-class OptionsFlowHandler(OptionsFlow):
-    """Handle a options flow for 2N Intercom."""
-
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle the initial step."""
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the host or login."""
+        entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if user_input is not None:
-            try:
-                coord = self.config_entry.runtime_data
-                dev = coord.device
-                motor_positions = await dev.async_recalibrate(user_input[CVM_PRESETS_ASPECT])
-            except Exception as err:
-                _LOGGER.exception("Recalibrate exception: %s", err)
-                errors["base"] = "recalibrate_exception"
-            else:
-                if motor_positions is not None:
-                    user_input[CVM_PRESETS_POSITION] = motor_positions
-                    _LOGGER.info("Recalibrated motor positions: presets=%s positions=%s", user_input[CVM_PRESETS_ASPECT], motor_positions)
-                    return self.async_create_entry(data=user_input)
-                else:
-                    errors["base"] = "recalibrate_failed"
+            if any(
+                other.data[CONF_HOST] == user_input[CONF_HOST]
+                for other in self._async_current_entries(include_ignore=False)
+                if other.entry_id != entry.entry_id
+            ):
+                return self.async_abort(reason="already_configured")
+            errors = await validate_connection(self.hass, user_input)
+            if not errors:
+                return self.async_update_reload_and_abort(entry, data_updates=user_input)
 
-        previous_data = {
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                CONNECTION_SCHEMA, user_input or entry.data
+            ),
+            errors=errors,
+        )
+
+
+class OptionsFlowHandler(OptionsFlow):
+    """Handle an options flow for Stewart CVM."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Edit the presets, optionally recalibrating the motor positions."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            aspects = user_input[CVM_PRESETS_ASPECT]
+            positions = user_input[CVM_PRESETS_POSITION]
+            try:
+                if user_input[CONF_RECALIBRATE]:
+                    parse_aspects(aspects)
+                else:
+                    parse_presets(aspects, positions)
+            except ValueError:
+                errors["base"] = "invalid_presets"
+
+            if not errors and user_input[CONF_RECALIBRATE]:
+                try:
+                    positions = await self.config_entry.runtime_data.device.async_recalibrate(aspects)
+                except CVMConnectionError:
+                    errors["base"] = "cannot_connect"
+                except TimeoutError:
+                    errors["base"] = "recalibrate_failed"
+                except Exception:
+                    _LOGGER.exception("Recalibration error")
+                    errors["base"] = "recalibrate_exception"
+                else:
+                    _LOGGER.info("Recalibrated motor positions: presets=%s positions=%s", aspects, positions)
+
+            if not errors:
+                return self.async_create_entry(
+                    data={CVM_PRESETS_ASPECT: aspects, CVM_PRESETS_POSITION: positions}
+                )
+
+        previous_data = user_input or {
             CVM_PRESETS_ASPECT: self.config_entry.options.get(CVM_PRESETS_ASPECT, self.config_entry.data[CVM_PRESETS_ASPECT]),
             CVM_PRESETS_POSITION: self.config_entry.options.get(CVM_PRESETS_POSITION, self.config_entry.data[CVM_PRESETS_POSITION])
         }
@@ -163,16 +218,3 @@ class OptionsFlowHandler(OptionsFlow):
             data_schema=self.add_suggested_values_to_schema(OPTIONS_USER_DATA_SCHEMA, previous_data),
             errors=errors
         )
-
-@staticmethod
-@callback
-def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-    """Create the options flow."""
-    return OptionsFlowHandler()
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(HomeAssistantError):
-    """Error to indicate there is invalid auth."""

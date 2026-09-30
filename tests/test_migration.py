@@ -14,11 +14,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.stewart_cvm.const import CONF_LEGACY_ENTRY, DOMAIN, LEGACY_DOMAIN
 
-from .conftest import HOST, LEGACY_DATA, LEGACY_OPTIONS
+from .conftest import DATA as LEGACY_DATA, HOST, OPTIONS as LEGACY_OPTIONS
 
 DEVICE_ID = f"CVM:{HOST}"
-COVER = "cover.cvm_10_0_1_143_screen_mask"
-SELECT = "select.cvm_10_0_1_143_screen_aspect_ratio"
+COVER = "cover.cvm_127_0_0_1_screen_mask"
+SELECT = "select.cvm_127_0_0_1_screen_aspect_ratio"
 
 
 def _legacy_setup(hass: HomeAssistant) -> tuple[MockConfigEntry, str]:
@@ -53,7 +53,7 @@ def _legacy_setup(hass: HomeAssistant) -> tuple[MockConfigEntry, str]:
     return legacy, device.id
 
 
-async def test_flow_offers_import(hass: HomeAssistant, mock_cvm) -> None:
+async def test_flow_offers_import(hass: HomeAssistant, cvm) -> None:
     """With a legacy entry present, the flow offers to import it."""
     legacy, _ = _legacy_setup(hass)
 
@@ -78,7 +78,7 @@ async def test_flow_offers_import(hass: HomeAssistant, mock_cvm) -> None:
     assert hass.config_entries.async_get_entry(legacy.entry_id) is None
 
 
-async def test_manual_path(hass: HomeAssistant, mock_cvm) -> None:
+async def test_manual_path(hass: HomeAssistant, cvm) -> None:
     """Choosing manual setup shows the normal form."""
     _legacy_setup(hass)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
@@ -89,14 +89,14 @@ async def test_manual_path(hass: HomeAssistant, mock_cvm) -> None:
     assert result["step_id"] == "user"
 
 
-async def test_no_legacy_shows_form(hass: HomeAssistant, mock_cvm) -> None:
+async def test_no_legacy_shows_form(hass: HomeAssistant, cvm) -> None:
     """Without a legacy entry, setup goes straight to the form."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
 
 
-async def test_takeover_keeps_ids(hass: HomeAssistant, mock_cvm) -> None:
+async def test_takeover_keeps_ids(hass: HomeAssistant, cvm) -> None:
     """Device and entities keep their IDs and customizations."""
     legacy, device_id = _legacy_setup(hass)
     entry = MockConfigEntry(
@@ -118,16 +118,15 @@ async def test_takeover_keeps_ids(hass: HomeAssistant, mock_cvm) -> None:
     assert ent_reg.async_get(COVER).name == "Mask"
     assert ent_reg.async_get(COVER).labels == {"theater"}
     assert len(er.async_entries_for_config_entry(ent_reg, entry.entry_id)) == 2
+    assert ent_reg.async_get(COVER).unique_id == f"{entry.entry_id}_screen_mask"
+    assert ent_reg.async_get(SELECT).unique_id == f"{entry.entry_id}_screen_aspect_ratio"
 
     device = dr.async_get(hass).async_get(device_id)
-    assert device.identifiers == {(DOMAIN, DEVICE_ID)}
+    assert device.identifiers == {(DOMAIN, entry.entry_id)}
     assert device.config_entries == {entry.entry_id}
     assert device.name_by_user == "Screen"
     assert device.area_id == "theater"
 
-    coord = entry.runtime_data
-    coord.async_set_updated_data(coord.device.data)
-    await hass.async_block_till_done()
     assert hass.states.get(COVER).attributes["current_position"] == 59
     assert hass.states.get(SELECT).state == "2.0"
     assert hass.config_entries.async_get_entry(legacy.entry_id) is None
