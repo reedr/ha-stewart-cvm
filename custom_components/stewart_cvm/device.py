@@ -167,24 +167,29 @@ class CVMDevice:
                 return True
 
             writer = None
-            logging_in = False
+            stage = f"opening TCP port {CVM_PORT}"
             try:
-                _LOGGER.debug("Establish new connection")
+                _LOGGER.debug("Connecting to %s:%d", self._host, CVM_PORT)
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(self._host, CVM_PORT),
                     timeout=CVM_CONNECT_TIMEOUT
                 )
+                stage = "waiting for the User: prompt"
+                _LOGGER.debug("%s: %s", self._host, stage)
                 await asyncio.wait_for(
                     reader.readuntil(b"User:"),
                     timeout=CVM_LOGIN_TIMEOUT
                 )
                 writer.write(self._username.encode('ascii') + b"\r")
+                stage = "waiting for the Password: prompt"
+                _LOGGER.debug("%s: %s", self._host, stage)
                 await asyncio.wait_for(
                     reader.readuntil(b"Password:"),
                     timeout=CVM_LOGIN_TIMEOUT
                 )
                 writer.write(self._password.encode('ascii') + b"\r")
-                logging_in = True
+                stage = "logging in"
+                _LOGGER.debug("%s: waiting for Connected: after the password", self._host)
                 await asyncio.wait_for(
                     reader.readuntil(b"Connected:"),
                     timeout=CVM_LOGIN_TIMEOUT
@@ -193,12 +198,22 @@ class CVMDevice:
                 self._online = False
                 if writer is not None:
                     await self._close_writer(writer)
-                if logging_in:
+                if isinstance(err, TimeoutError):
+                    reason = "timed out"
+                elif isinstance(err, asyncio.IncompleteReadError):
+                    reason = f"connection closed by the controller after {err.partial!r}"
+                else:
+                    reason = repr(err)
+                _LOGGER.debug("%s: failed while %s: %s", self._host, stage, reason)
+                if stage == "logging in":
                     raise CVMAuthError(
-                        f"{self._host} didn't accept the login; check the username and password"
+                        f"{self._host} didn't accept the login ({reason}); check the username and password"
                     ) from err
-                raise CVMConnectionError(f"Cannot connect to {self._host}: {err!r}") from err
+                raise CVMConnectionError(
+                    f"Cannot connect to {self._host}: {reason} while {stage}"
+                ) from err
 
+            _LOGGER.debug("%s: logged in", self._host)
             if test:
                 await self._close_writer(writer)
             else:

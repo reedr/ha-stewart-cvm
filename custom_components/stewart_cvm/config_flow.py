@@ -47,6 +47,18 @@ OPTIONS_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
+def clean_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Trim the host and username and tidy the preset lists; the password is kept as typed."""
+    cleaned = dict(user_input)
+    for key in (CONF_HOST, CONF_USERNAME):
+        if key in cleaned:
+            cleaned[key] = cleaned[key].strip()
+    for key in (CVM_PRESETS_ASPECT, CVM_PRESETS_POSITION):
+        if key in cleaned:
+            cleaned[key] = ",".join(part.strip() for part in cleaned[key].split(","))
+    return cleaned
+
+
 async def validate_connection(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, str]:
     """Try to log in; return form errors."""
     dev = CVMDevice(
@@ -54,9 +66,11 @@ async def validate_connection(hass: HomeAssistant, data: dict[str, Any]) -> dict
     )
     try:
         await dev.test_connection()
-    except CVMAuthError:
+    except CVMAuthError as err:
+        _LOGGER.warning("Setup could not log in: %s", err)
         return {"base": "invalid_auth"}
-    except CVMConnectionError:
+    except CVMConnectionError as err:
+        _LOGGER.warning("Setup could not connect: %s", err)
         return {"base": "cannot_connect"}
     except Exception:
         _LOGGER.exception("Unexpected exception")
@@ -102,6 +116,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = clean_input(user_input)
             self._async_abort_entries_match({CONF_HOST: user_input[CONF_HOST]})
             try:
                 parse_presets(user_input[CVM_PRESETS_ASPECT], user_input[CVM_PRESETS_POSITION])
@@ -155,6 +170,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = clean_input(user_input)
             if any(
                 other.data[CONF_HOST] == user_input[CONF_HOST]
                 for other in self._async_current_entries(include_ignore=False)
@@ -181,6 +197,7 @@ class OptionsFlowHandler(OptionsFlow):
         """Edit the presets, optionally recalibrating the motor positions."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = clean_input(user_input)
             aspects = user_input[CVM_PRESETS_ASPECT]
             positions = user_input[CVM_PRESETS_POSITION]
             try:
@@ -194,9 +211,11 @@ class OptionsFlowHandler(OptionsFlow):
             if not errors and user_input[CONF_RECALIBRATE]:
                 try:
                     positions = await self.config_entry.runtime_data.device.async_recalibrate(aspects)
-                except CVMConnectionError:
+                except CVMConnectionError as err:
+                    _LOGGER.warning("Recalibration could not connect: %s", err)
                     errors["base"] = "cannot_connect"
-                except TimeoutError:
+                except TimeoutError as err:
+                    _LOGGER.warning("Recalibration failed: %s", err)
                     errors["base"] = "recalibrate_failed"
                 except Exception:
                     _LOGGER.exception("Recalibration error")

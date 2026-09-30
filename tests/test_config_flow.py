@@ -24,14 +24,34 @@ async def test_user_creates_entry(hass: HomeAssistant, cvm) -> None:
     await hass.async_block_till_done()
 
 
-async def test_user_errors(hass: HomeAssistant, cvm) -> None:
+async def test_user_input_is_trimmed(hass: HomeAssistant, cvm) -> None:
+    """Stray spaces around the host, username and preset values are removed."""
+    result = await _user(
+        hass,
+        {
+            **DATA,
+            "host": " 127.0.0.1 ",
+            "username": "user ",
+            "cvmpresetar": " 1.78, 2.2, 1.85, 2.4, 2.0, 1.5 ",
+            "cvmpresetpos": "5.79 ,1.76,5.06, 0.0,3.52,8.64",
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == DATA
+    await hass.async_block_till_done()
+
+
+async def test_user_errors(hass: HomeAssistant, cvm, caplog) -> None:
     result = await _user(hass, {**DATA, "cvmpresetpos": "1,2"})
     assert result["errors"] == {"base": "invalid_presets"}
     result = await _user(hass, {**DATA, "password": "wrong"})
     assert result["errors"] == {"base": "invalid_auth"}
+    assert "Setup could not log in: 127.0.0.1 didn't accept the login (timed out)" in caplog.text
     await cvm.stop()
     result = await _user(hass, DATA)
     assert result["errors"] == {"base": "cannot_connect"}
+    assert "Setup could not connect: Cannot connect to 127.0.0.1:" in caplog.text
+    assert "while opening TCP port" in caplog.text
 
 
 async def test_user_duplicate_host(hass: HomeAssistant, cvm) -> None:
@@ -47,10 +67,11 @@ async def test_reconfigure(hass: HomeAssistant, cvm) -> None:
     result = await entry.start_reconfigure_flow(hass)
     assert result["step_id"] == "reconfigure"
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"host": DATA["host"], "username": "user", "password": "pass"}
+        result["flow_id"], {"host": f" {DATA['host']}", "username": "user", "password": "pass"}
     )
     assert result["reason"] == "reconfigure_successful"
     assert entry.data["password"] == "pass"
+    assert entry.data["host"] == DATA["host"]
     await hass.async_block_till_done()
 
 
@@ -68,7 +89,7 @@ async def test_options_without_recalibrating(hass: HomeAssistant, cvm) -> None:
     assert result["errors"] == {"base": "invalid_presets"}
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"cvmpresetar": "1.78,2.4", "cvmpresetpos": "5,0", "recalibrate": False},
+        {"cvmpresetar": "1.78, 2.4", "cvmpresetpos": " 5, 0", "recalibrate": False},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options == {"cvmpresetar": "1.78,2.4", "cvmpresetpos": "5,0"}
