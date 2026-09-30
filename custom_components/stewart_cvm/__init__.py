@@ -10,12 +10,15 @@ from homeassistant.core import HomeAssistant
 from .const import CVM_PRESETS_ASPECT, CVM_PRESETS_POSITION
 from .coordinator import CVMConfigEntry, CVMCoordinator
 from .device import CVMDevice
+from .migration import async_migrate_legacy_entry
 
 _PLATFORMS: list[Platform] = [Platform.COVER, Platform.SELECT]
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: CVMConfigEntry) -> bool:
     """Set up CVM device from a config entry."""
+
+    async_migrate_legacy_entry(hass, entry)
 
     aspect_ratios = entry.options.get(CVM_PRESETS_ASPECT, entry.data[CVM_PRESETS_ASPECT])
     motor_positions = entry.options.get(CVM_PRESETS_POSITION, entry.data[CVM_PRESETS_POSITION])

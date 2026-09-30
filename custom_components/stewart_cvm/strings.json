@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Stewart CVM",
+        "menu_options": {
+          "import_legacy": "Import the existing CVM setup",
+          "manual": "Set up a new controller"
+        },
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password",
+          "cvmpresetar": "Preset Aspect Ratios",
+          "cvmpresetpos": "Preset Motor Positions"
+        }
+      },
+      "import_legacy": {
+        "title": "Import {title}",
+        "description": "Takes over the old CVM integration's setup for {host}: its settings, device and entities, so entity IDs, history, areas and automations keep working. The old entry is removed afterwards."
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unknown error"
+    },
+    "abort": {
+      "already_configured": "Already configured",
+      "no_legacy_entry": "No setup from the old CVM integration was found."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "cvmpresetar": "Preset Aspect Ratios",
+          "cvmpresetpos": "Preset Motor Positions"
+        }
+      }
+    }
+  }
+}

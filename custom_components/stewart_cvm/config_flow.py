@@ -12,7 +12,13 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import CVM_PRESETS_ASPECT, CVM_PRESETS_POSITION, DOMAIN
+from .const import (
+    CONF_LEGACY_ENTRY,
+    CVM_PRESETS_ASPECT,
+    CVM_PRESETS_POSITION,
+    DOMAIN,
+    LEGACY_DOMAIN,
+)
 from .device import CVMDevice
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,6 +55,22 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize the flow."""
+        self._skip_legacy = False
+
+    def _legacy_entries(self) -> list[ConfigEntry]:
+        """Config entries of the legacy "CVM" package not yet imported."""
+        imported = {
+            entry.data.get(CONF_LEGACY_ENTRY)
+            for entry in self.hass.config_entries.async_entries(DOMAIN)
+        }
+        return [
+            entry
+            for entry in self.hass.config_entries.async_entries(LEGACY_DOMAIN)
+            if entry.entry_id not in imported
+        ]
+
     @staticmethod
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         """Create the options flow."""
@@ -58,6 +80,11 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial step."""
+        if user_input is None and not self._skip_legacy and self._legacy_entries():
+            return self.async_show_menu(
+                step_id="user", menu_options=["import_legacy", "manual"]
+            )
+
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
@@ -74,6 +101,35 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user", data_schema=CONFIG_USER_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Set up a new controller instead of importing the legacy one."""
+        self._skip_legacy = True
+        return await self.async_step_user()
+
+    async def async_step_import_legacy(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Import the legacy entry: same settings, device and entity IDs."""
+        legacies = self._legacy_entries()
+        if not legacies:
+            return self.async_abort(reason="no_legacy_entry")
+        legacy = legacies[0]
+        if user_input is None:
+            return self.async_show_form(
+                step_id="import_legacy",
+                description_placeholders={
+                    "title": legacy.title,
+                    "host": legacy.data[CONF_HOST],
+                },
+            )
+        return self.async_create_entry(
+            title=legacy.title,
+            data={**legacy.data, CONF_LEGACY_ENTRY: legacy.entry_id},
+            options=dict(legacy.options),
         )
 
 class OptionsFlowHandler(OptionsFlow):

@@ -1,9 +1,13 @@
-"""Constants for the 2N Intercom integration."""
+"""Constants for the Stewart CVM integration."""
 
-DOMAIN = "CVM"
+DOMAIN = "stewart_cvm"
 MANUFACTURER = "Stewart"
 MODEL = "CVM"
 EVENT = "CVM_event"
+
+# Domain used by the pre-HACS package; its config entries are imported by the config flow.
+LEGACY_DOMAIN = "CVM"
+CONF_LEGACY_ENTRY = "legacy_entry_id"
 
 CVM_PRESETS_ASPECT = "cvmpresetar"
 CVM_PRESETS_POSITION = "cvmpresetpos"
