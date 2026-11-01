@@ -384,7 +384,12 @@ class CVMDevice:
 
                 match = self._match_re.match(line)
                 if match is None:
-                    _LOGGER.warning("Unexpected screen response: %s", line)
+                    if line.startswith(b"!UID"):
+                        # The e-Node echoes its CS-Bus config (SHADOW/QUALIFY/ACTION tables) to
+                        # every telnet session, e.g. after a reconnect or while its web pages are open.
+                        _LOGGER.debug("e-Node config line ignored: %s", line)
+                    else:
+                        _LOGGER.warning("Unexpected screen response: %s", line)
                     continue
 
                 if match.group(1) == b'#' and match.group(4) == b"RECALL":

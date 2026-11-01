@@ -42,3 +42,20 @@ async def test_recalibrate(hass: HomeAssistant, cvm, start: float) -> None:
     finally:
         await dev.async_close()
     assert [float(p) for p in result.split(",")] == PRESET_POSITIONS
+
+
+async def test_enode_config_lines_not_warned(hass: HomeAssistant, cvm, caplog) -> None:
+    """The e-Node's CS-Bus config echo (!UID...) is ignored quietly; other junk still warns."""
+    dev = CVMDevice(hass, HOST, "user", "pass", ASPECTS, POSITIONS)
+    await dev.async_init(lambda data: None)
+    try:
+        caplog.clear()
+        cvm._broadcast("!UID2.C.BUS.SHADOW.1=255.255.255;")
+        cvm._broadcast("!UID2.C.BUS.ACTION.8=0;")
+        cvm._broadcast("garbage")
+        await dev.async_read_position()
+    finally:
+        await dev.async_close()
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert not any("UID2" in m for m in warnings)
+    assert any("garbage" in m for m in warnings)
